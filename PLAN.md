@@ -13,8 +13,8 @@ Sam is the **sole system of record** for the cellar — she owns the spreadsheet
 Use `adk create` to initialize the project, then add custom files:
 
 ```bash
-cd /home/jonathan/projects/agents
-adk create sommelier --model gemini-3.1-pro-preview --project playingwithai-460811 --region us-central1
+cd /path/to/your/agents
+adk create sommelier --model gemini-3.1-pro-preview --project YOUR_PROJECT_ID --region us-central1
 ```
 
 This generates the base `__init__.py`, `agent.py`, and `.env`. Then we add:
@@ -46,7 +46,7 @@ sommelier/
 
 ### `.env` Configuration
 ```
-GOOGLE_CLOUD_PROJECT=playingwithai-460811
+GOOGLE_CLOUD_PROJECT=your-project-id
 GOOGLE_CLOUD_LOCATION=global
 GOOGLE_GENAI_USE_VERTEXAI=TRUE
 
@@ -58,14 +58,14 @@ SOMMELIER_SECRET_NAME=sommelier-credentials
 # SOMMELIER_CREDENTIALS=path/to/local/sa-key.json
 
 # Spreadsheet IDs
-SOMMELIER_CELLAR_SSID=1tWi10IxO14FqJXSvcuG7rt2dZS3q2NMEvgKWzvL43_E
-SOMMELIER_CONSUMED_SSID=152rrFFUh_qh2BuKDLnPgifEq8h2Fvu39C7qvGXUrJ5U
-SOMMELIER_MEMORY_DOC_ID=10eYZS_gBb2rW217xr-hns5W_XXK_eT7vJ2fJCmlUDJ4
+SOMMELIER_CELLAR_SSID=your-cellar-spreadsheet-id
+SOMMELIER_CONSUMED_SSID=your-consumed-wines-spreadsheet-id
+SOMMELIER_MEMORY_DOC_ID=your-memory-google-doc-id
 
 # Deployment
-ADK_BIN=/home/jonathan/projects/my_venv/bin/adk
-ADK_PYTHON=/home/jonathan/projects/my_venv/bin/python3
-MIDDLEWARE_DIR=/home/jonathan/projects/slack-vertex-ai-middleware
+ADK_BIN=/path/to/your/venv/bin/adk
+ADK_PYTHON=/path/to/your/venv/bin/python3
+MIDDLEWARE_DIR=/path/to/slack-vertex-ai-middleware
 AGENT_DISPLAY_NAME=Sam the Som
 SLACK_BOT_SECRET=slack-sommelier
 ```
@@ -298,7 +298,7 @@ This requires adding the `users:read` scope to all Slack bot apps (including Sam
 - Redeploy middleware to Cloud Run
 
 ### 1. Create Service Account
-- Create new SA in `playingwithai-460811` for Sam
+- Create new SA in your GCP project for Sam
 - Grant Sheets, Drive, Docs access
 - Store key in Secret Manager as `sommelier-credentials`
 - Share both spreadsheets and the memory doc with the SA email
