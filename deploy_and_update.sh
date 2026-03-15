@@ -105,17 +105,20 @@ fi
 ok "Slack bot user ID: $SLACK_BOT_ID"
 
 # Ensure the default compute SA can read the credentials secret
-COMPUTE_SA="${PROJECT_ID//[^0-9]/}"  # extract project number from any existing bindings
-COMPUTE_SA=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null)
-if [[ -n "$COMPUTE_SA" && -n "${SOMMELIER_SECRET_NAME:-}" ]]; then
-    log "Ensuring compute SA can access credentials secret..."
-    gcloud secrets add-iam-policy-binding "$SOMMELIER_SECRET_NAME" \
-        --project="$PROJECT_ID" \
-        --member="serviceAccount:${COMPUTE_SA}-compute@developer.gserviceaccount.com" \
-        --role="roles/secretmanager.secretAccessor" \
-        --quiet 2>/dev/null \
-        && ok "Compute SA has access to $SOMMELIER_SECRET_NAME" \
-        || warn "Could not update secret IAM — you may need to grant access manually"
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null)
+if [[ -n "$PROJECT_NUMBER" && -n "${SOMMELIER_SECRET_NAME:-}" ]]; then
+    log "Ensuring service accounts can access credentials secret..."
+    for SA in \
+        "${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+        "service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com" \
+        "service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"; do
+        gcloud secrets add-iam-policy-binding "$SOMMELIER_SECRET_NAME" \
+            --project="$PROJECT_ID" \
+            --member="serviceAccount:${SA}" \
+            --role="roles/secretmanager.secretAccessor" \
+            --quiet 2>/dev/null || true
+    done
+    ok "Service accounts granted access to $SOMMELIER_SECRET_NAME"
 fi
 
 # ──────────────────────────────────────────────────────────────
