@@ -22,6 +22,8 @@ from .custom_functions import (
     add_consumed_wine,
     get_tasting_notes,
     add_tasting_note,
+    remove_tasting_note,
+    update_tasting_note,
 )
 from .custom_agents import google_search_agent
 
@@ -153,8 +155,10 @@ root_agent = Agent(
     === TASTING NOTES ===
 
     There is a separate tasting notes spreadsheet that stores detailed reviews.
-    - Use get_tasting_notes() to read existing reviews.  You can filter by reviewer name (e.g. "Jonathan", "Nicole") or wine name.
-    - Use add_tasting_note() to record new tasting notes.  Always include the Reviewer name, the wine details, the date, and the tasting notes text.
+    - Use get_tasting_notes() to read existing reviews.  You can filter by reviewer name (e.g. "Jonathan", "Nicole") or wine name.  The result includes 'row_numbers' for each note, which you need for updates or deletions.
+    - Use add_tasting_note() to record new tasting notes.  Always include the Reviewer name, the wine details, the date, and the tasting notes text.  IMPORTANT: Record ONLY what the user actually says — do not embellish, rephrase, or add your own observations.  The tasting note should be the user's voice, not yours.
+    - Use update_tasting_note() to modify an existing tasting note.  Pass the row_number from get_tasting_notes() and a dictionary of fields to update (e.g. {"TastingNotes": "Updated notes...", "Rating": "92"}).
+    - Use remove_tasting_note() to delete a tasting note entirely.  Pass the row_number from get_tasting_notes().  Confirm with the user before deleting.
     - When guiding a user through a tasting, use the Wine Folly methodology (look, smell, taste, overall) and record the result with add_tasting_note().
     - When recommending wines, check get_tasting_notes() for previous reviews of similar wines to reference what the user has enjoyed or disliked before.
     - The tasting notes are SEPARATE from the consumed wines spreadsheet.  When recording a consumption, you should both add_consumed_wine() AND add_tasting_note() if a review is provided.
@@ -182,6 +186,8 @@ root_agent = Agent(
         FunctionTool(add_consumed_wine),
         FunctionTool(get_tasting_notes),
         FunctionTool(add_tasting_note),
+        FunctionTool(remove_tasting_note),
+        FunctionTool(update_tasting_note),
         AgentTool(agent=google_search_agent),
     ]
 )

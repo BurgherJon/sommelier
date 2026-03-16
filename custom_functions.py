@@ -336,8 +336,10 @@ def remove_wine_from_cellar(row_number: int) -> Dict[str, Any]:
         raise ValueError("SOMMELIER_CELLAR_SSID environment variable not set")
 
     connector = get_sheets_connector()
+    # Look up the actual sheet ID by name (can't assume it's 0)
+    sheet_id = connector.get_sheet_id_by_name(spreadsheet_id, CELLAR_TAB)
     # Convert 1-based row number to 0-based index for the API
-    return connector.delete_row(spreadsheet_id, sheet_id=0, row_index=row_number - 1)
+    return connector.delete_row(spreadsheet_id, sheet_id=sheet_id, row_index=row_number - 1)
 
 
 def update_cellar_wine(row_number: int, updates: Dict[str, str]) -> Dict[str, Any]:
@@ -679,7 +681,8 @@ def get_tasting_notes(reviewer: str = "", wine_name: str = "") -> Dict[str, Any]
                    Case-insensitive partial match.
 
     Returns:
-        Dictionary with 'headers', 'notes' (list of dicts), and 'total'.
+        Dictionary with 'headers', 'notes' (list of dicts), 'total', and
+        'row_numbers' (1-based row numbers for use with update/remove).
     """
     spreadsheet_id = os.getenv('SOMMELIER_TASTING_NOTES_SSID')
     if not spreadsheet_id:
@@ -689,17 +692,16 @@ def get_tasting_notes(reviewer: str = "", wine_name: str = "") -> Dict[str, Any]
     rows = connector.read_sheet(spreadsheet_id, f"'{TASTING_NOTES_TAB}'!A:AK")
 
     if not rows or len(rows) < 2:
-        return {'headers': TASTING_NOTES_HEADERS, 'notes': [], 'total': 0}
+        return {'headers': TASTING_NOTES_HEADERS, 'notes': [], 'total': 0, 'row_numbers': []}
 
     headers = rows[0]
     notes = []
+    row_numbers = []
 
     reviewer_idx = headers.index('Reviewer') if 'Reviewer' in headers else None
     wine_idx = headers.index('Wine') if 'Wine' in headers else None
 
-    for row in rows[1:]:
-        note = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
-
+    for row_idx, row in enumerate(rows[1:], start=2):  # row 2 is first data row
         if reviewer and reviewer_idx is not None:
             val = row[reviewer_idx] if reviewer_idx < len(row) else ''
             if reviewer.lower() not in val.lower():
@@ -710,9 +712,11 @@ def get_tasting_notes(reviewer: str = "", wine_name: str = "") -> Dict[str, Any]
             if wine_name.lower() not in val.lower():
                 continue
 
+        note = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
         notes.append(note)
+        row_numbers.append(row_idx)
 
-    return {'headers': headers, 'notes': notes, 'total': len(notes)}
+    return {'headers': headers, 'notes': notes, 'total': len(notes), 'row_numbers': row_numbers}
 
 
 def add_tasting_note(
@@ -812,3 +816,69 @@ def add_tasting_note(
 
     connector = get_sheets_connector()
     return connector.append_sheet(spreadsheet_id, f"'{TASTING_NOTES_TAB}'!A:AK", [new_row])
+
+
+def remove_tasting_note(row_number: int) -> Dict[str, Any]:
+    """
+    Remove a tasting note from the tasting notes spreadsheet by deleting its row.
+
+    Use get_tasting_notes() first to find the row_number of the note to
+    remove. The row_number is 1-based (row 1 = headers, row 2 = first note).
+
+    Args:
+        row_number: The 1-based row number to delete (as returned by
+                    get_tasting_notes in 'row_numbers').
+
+    Returns:
+        Response from the API confirming the deletion.
+    """
+    spreadsheet_id = os.getenv('SOMMELIER_TASTING_NOTES_SSID')
+    if not spreadsheet_id:
+        raise ValueError("SOMMELIER_TASTING_NOTES_SSID environment variable not set")
+
+    connector = get_sheets_connector()
+    # Look up the actual sheet ID by name (can't assume it's 0)
+    sheet_id = connector.get_sheet_id_by_name(spreadsheet_id, TASTING_NOTES_TAB)
+    # Convert 1-based row number to 0-based index for the API
+    return connector.delete_row(spreadsheet_id, sheet_id=sheet_id, row_index=row_number - 1)
+
+
+def update_tasting_note(row_number: int, updates: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Update specific fields of a tasting note in the tasting notes spreadsheet.
+
+    Use get_tasting_notes() first to find the row_number. Then pass a dictionary
+    of column names and their new values.
+
+    Args:
+        row_number: The 1-based row number to update (as returned by
+                    get_tasting_notes in 'row_numbers').
+        updates: Dictionary mapping column names to new values.
+                 Example: {"TastingNotes": "Updated notes...", "Rating": "92"}
+
+    Returns:
+        Dictionary with 'updated_cells' count.
+    """
+    spreadsheet_id = os.getenv('SOMMELIER_TASTING_NOTES_SSID')
+    if not spreadsheet_id:
+        raise ValueError("SOMMELIER_TASTING_NOTES_SSID environment variable not set")
+
+    connector = get_sheets_connector()
+    # Read the header row to map column names to indices
+    header_rows = connector.read_sheet(spreadsheet_id, f"'{TASTING_NOTES_TAB}'!1:1")
+    if not header_rows:
+        raise ValueError("Could not read headers from tasting notes spreadsheet")
+
+    headers = header_rows[0]
+    updated_count = 0
+
+    for col_name, new_value in updates.items():
+        if col_name not in headers:
+            continue
+        col_idx = headers.index(col_name)
+        col_letter = _col_index_to_letter(col_idx)
+        cell_range = f"'{TASTING_NOTES_TAB}'!{col_letter}{row_number}"
+        connector.write_sheet(spreadsheet_id, cell_range, [[new_value]])
+        updated_count += 1
+
+    return {'updated_cells': updated_count}

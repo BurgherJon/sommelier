@@ -148,6 +148,27 @@ class GoogleSheetsConnector:
         ).execute()
         return result
 
+    def get_sheet_id_by_name(self, spreadsheet_id: str, sheet_name: str) -> int:
+        """
+        Get the numeric sheet ID for a sheet by its name.
+
+        Args:
+            spreadsheet_id: The ID of the spreadsheet.
+            sheet_name: The name of the sheet (tab).
+
+        Returns:
+            The numeric sheet ID.
+
+        Raises:
+            ValueError: If no sheet with the given name is found.
+        """
+        metadata = self.get_spreadsheet_metadata(spreadsheet_id)
+        for sheet in metadata.get('sheets', []):
+            props = sheet.get('properties', {})
+            if props.get('title') == sheet_name:
+                return props.get('sheetId')
+        raise ValueError(f"No sheet named '{sheet_name}' found in spreadsheet")
+
 
 class GoogleDocsConnector:
     """Manages connection to Google Docs API."""
