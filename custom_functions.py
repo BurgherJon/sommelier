@@ -4,6 +4,7 @@ Provides memory, cellar inventory, and consumed wines management.
 """
 
 from typing import List, Dict, Any
+from datetime import datetime
 import os
 from .sheet_utilities import get_sheets_connector, get_docs_connector
 
@@ -16,7 +17,7 @@ CONSUMED_TAB = 'My Consumed Bottles'
 TASTING_NOTES_TAB = 'My Tasting Notes'
 
 # ---------------------------------------------------------------------------
-# Cellar spreadsheet column headers (47 columns, in order)
+# Cellar spreadsheet column headers (49 columns, in order)
 # ---------------------------------------------------------------------------
 CELLAR_HEADERS = [
     'iInventory', 'Pending', 'Barcode', 'WineBarcode', 'Currency',
@@ -28,6 +29,7 @@ CELLAR_HEADERS = [
     'Bin', 'BeginConsume', 'EndConsume', 'WindowSource', 'BarcodePrinted',
     'LikeVotes', 'LikePercent', 'LikeIt', 'PNotes', 'PScore', 'CScore',
     'JS', 'JSBegin', 'JSEnd',
+    'Coravined', 'CoravinedDate',  # Coravin tracking columns
 ]
 
 # Consumed wines spreadsheet column headers (40 columns, in order)
@@ -218,6 +220,8 @@ def add_wine_to_cellar(
     JS: str = "",
     PScore: str = "",
     CScore: str = "",
+    Coravined: str = "",
+    CoravinedDate: str = "",
 ) -> Dict[str, Any]:
     """
     Add a new bottle to the wine cellar spreadsheet.
@@ -261,7 +265,7 @@ def add_wine_to_cellar(
     if not spreadsheet_id:
         raise ValueError("SOMMELIER_CELLAR_SSID environment variable not set")
 
-    # Build row matching the 47-column structure
+    # Build row matching the 49-column structure
     new_row = [
         '',             # iInventory (auto or blank)
         '',             # Pending
@@ -310,6 +314,8 @@ def add_wine_to_cellar(
         JS,             # JS
         '',             # JSBegin
         '',             # JSEnd
+        Coravined,      # Coravined
+        CoravinedDate,  # CoravinedDate
     ]
 
     connector = get_sheets_connector()
@@ -882,3 +888,146 @@ def update_tasting_note(row_number: int, updates: Dict[str, str]) -> Dict[str, A
         updated_count += 1
 
     return {'updated_cells': updated_count}
+
+
+# ---------------------------------------------------------------------------
+# Coravin tracking functions
+# ---------------------------------------------------------------------------
+
+def get_coravined_wines(location: str = "") -> Dict[str, Any]:
+    """
+    Retrieve all currently Coravined bottles from the cellar.
+
+    Returns bottles that have been opened with a Coravin device and are
+    available for by-the-glass consumption. Includes age information to
+    help identify bottles that have been Coravined too long (over 2-3 months).
+
+    Args:
+        location: Optional filter - "NYC" or "Poconos". Leave empty for all.
+
+    Returns:
+        Dictionary with:
+        - 'headers': Column names
+        - 'wines': List of Coravined wine dicts, each with an extra
+                   'days_since_coravined' field calculated from CoravinedDate
+        - 'total': Number of Coravined bottles
+        - 'row_numbers': 1-based row numbers for each bottle
+        - 'warnings': List of wines Coravined over 60 days ago
+    """
+    spreadsheet_id = os.getenv('SOMMELIER_CELLAR_SSID')
+    if not spreadsheet_id:
+        raise ValueError("SOMMELIER_CELLAR_SSID environment variable not set")
+
+    connector = get_sheets_connector()
+    rows = connector.read_sheet(spreadsheet_id, f"'{CELLAR_TAB}'!A:AW")
+
+    if not rows or len(rows) < 2:
+        return {'headers': CELLAR_HEADERS, 'wines': [], 'total': 0,
+                'row_numbers': [], 'warnings': []}
+
+    headers = rows[0]
+    coravined_idx = headers.index('Coravined') if 'Coravined' in headers else None
+    coravined_date_idx = headers.index('CoravinedDate') if 'CoravinedDate' in headers else None
+    location_idx = headers.index('Location') if 'Location' in headers else None
+
+    if coravined_idx is None:
+        return {'headers': headers, 'wines': [], 'total': 0,
+                'row_numbers': [], 'warnings': []}
+
+    wines = []
+    row_numbers = []
+    warnings = []
+    today = datetime.now()
+
+    for row_idx, row in enumerate(rows[1:], start=2):
+        coravined_val = row[coravined_idx] if coravined_idx < len(row) else ''
+        if coravined_val.upper() != 'TRUE':
+            continue
+
+        # Apply location filter
+        if location and location_idx is not None:
+            loc_val = row[location_idx] if location_idx < len(row) else ''
+            if location.lower() not in loc_val.lower():
+                continue
+
+        wine = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+
+        # Calculate days since Coravined
+        days_since = None
+        if coravined_date_idx is not None:
+            date_str = row[coravined_date_idx] if coravined_date_idx < len(row) else ''
+            if date_str:
+                for fmt in ('%m/%d/%Y', '%Y-%m-%d', '%m-%d-%Y'):
+                    try:
+                        coravin_dt = datetime.strptime(date_str, fmt)
+                        days_since = (today - coravin_dt).days
+                        break
+                    except ValueError:
+                        continue
+
+        wine['days_since_coravined'] = days_since
+        wines.append(wine)
+        row_numbers.append(row_idx)
+
+        # Warn if Coravined over 60 days ago
+        if days_since is not None and days_since > 60:
+            warnings.append({
+                'wine': wine.get('Wine', ''),
+                'vintage': wine.get('Vintage', ''),
+                'days_since_coravined': days_since,
+                'row_number': row_idx,
+            })
+
+    return {
+        'headers': headers,
+        'wines': wines,
+        'total': len(wines),
+        'row_numbers': row_numbers,
+        'warnings': warnings,
+    }
+
+
+def mark_wine_coravined(row_number: int, coravined_date: str) -> Dict[str, Any]:
+    """
+    Mark a bottle as Coravined (opened with Coravin device for by-the-glass service).
+
+    Use search_cellar() first to find the row_number of the bottle to mark.
+    Once Coravined, the bottle should be prioritized for consumption within
+    2-3 months to preserve wine quality.
+
+    Args:
+        row_number: The 1-based row number of the bottle (as returned by
+                    search_cellar in 'row_numbers').
+        coravined_date: Date the bottle was Coravined (e.g. "3/15/2026").
+
+    Returns:
+        Dictionary with 'updated_fields', 'row_number', and 'api_responses'.
+    """
+    if not coravined_date:
+        raise ValueError("coravined_date is required")
+
+    return update_cellar_wine(row_number, {
+        'Coravined': 'TRUE',
+        'CoravinedDate': coravined_date,
+    })
+
+
+def unmark_wine_coravined(row_number: int) -> Dict[str, Any]:
+    """
+    Remove the Coravined status from a bottle.
+
+    Use this when a Coravined status was set in error. When a Coravined bottle
+    is fully consumed, use remove_wine_from_cellar() instead — the Coravin
+    status is automatically removed since the row is deleted.
+
+    Args:
+        row_number: The 1-based row number of the bottle (as returned by
+                    search_cellar in 'row_numbers').
+
+    Returns:
+        Dictionary with 'updated_fields', 'row_number', and 'api_responses'.
+    """
+    return update_cellar_wine(row_number, {
+        'Coravined': '',
+        'CoravinedDate': '',
+    })

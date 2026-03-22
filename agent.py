@@ -24,6 +24,9 @@ from .custom_functions import (
     add_tasting_note,
     remove_tasting_note,
     update_tasting_note,
+    get_coravined_wines,
+    mark_wine_coravined,
+    unmark_wine_coravined,
 )
 from .custom_agents import google_search_agent
 
@@ -163,6 +166,37 @@ root_agent = Agent(
     - When recommending wines, check get_tasting_notes() for previous reviews of similar wines to reference what the user has enjoyed or disliked before.
     - The tasting notes are SEPARATE from the consumed wines spreadsheet.  When recording a consumption, you should both add_consumed_wine() AND add_tasting_note() if a review is provided.
 
+    === CORAVIN MANAGEMENT ===
+
+    The Coravin is a wine preservation device that allows you to pour wine without removing the cork, preserving the remaining wine for months.  Track Coravined bottles to ensure they get consumed within 2-3 months.
+
+    **When the user Coravins a bottle:**
+    1. Use search_cellar() to find the bottle.
+    2. Confirm which specific bottle if multiples exist.
+    3. Get today's date via google_search_agent.
+    4. Call mark_wine_coravined() with the row_number and date.
+    5. Remind the user to finish this bottle within 2-3 months.
+
+    **When recommending wine "by the glass":**
+    1. First call get_coravined_wines() filtered by their location.
+    2. PRIORITIZE already-Coravined bottles — these are already open!
+    3. Check the 'days_since_coravined' field — older bottles should be consumed first.
+    4. If 'warnings' contains any wines (Coravined > 60 days), STRONGLY recommend those first and alert the user they need to be finished soon.
+    5. Only suggest opening a new bottle with Coravin if no suitable Coravined wines are available.
+
+    **Proactive Coravin warnings:**
+    When you check get_coravined_wines() and find bottles in 'warnings' (Coravined > 60 days), proactively mention them: "By the way, your [Wine] has been Coravined for [X] days — we should finish that soon to preserve its quality!"
+
+    **When a Coravined bottle is fully consumed:**
+    1. Record consumption via add_consumed_wine() as normal.
+    2. Call remove_wine_from_cellar() to remove from cellar.
+    (The Coravined status is automatically removed since the row is deleted.)
+
+    **Important Coravin notes:**
+    - White wines and lighter reds last longer under Coravin (up to 3 months).
+    - Full-bodied reds should be consumed within 6-8 weeks.
+    - Sparkling wines should NOT be Coravined — they lose carbonation.  If someone tries to Coravin a sparkling wine, gently explain why it's not recommended.
+
     === MEMORY MANAGEMENT ===
 
     Your memory document is your persistent knowledge across conversations.  Manage it carefully:
@@ -188,6 +222,9 @@ root_agent = Agent(
         FunctionTool(add_tasting_note),
         FunctionTool(remove_tasting_note),
         FunctionTool(update_tasting_note),
+        FunctionTool(get_coravined_wines),
+        FunctionTool(mark_wine_coravined),
+        FunctionTool(unmark_wine_coravined),
         AgentTool(agent=google_search_agent),
     ]
 )
