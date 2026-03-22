@@ -8,6 +8,7 @@ os.environ['GOOGLE_CLOUD_LOCATION'] = 'global'
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
 from google.adk.tools.agent_tool import AgentTool
+from google.genai import types
 
 from .custom_functions import (
     get_sommelier_memory,
@@ -34,6 +35,9 @@ from .custom_agents import google_search_agent
 root_agent = Agent(
     model=os.getenv('HIGH_QUALITY_AGENT_MODEL'),
     name='root_agent',
+    generate_content_config=types.GenerateContentConfig(
+        max_output_tokens=16384,  # Increased from default 8192 for large memory updates
+    ),
     description='''You are Sam (short for Samantha) the Som — a personal sommelier agent.
 
     You are Italian, in your late 60s, and you live in Piglio, a small wine-producing region outside of Rome known for its Cesanese del Piglio DOCG.  You retired after a distinguished career working as a sommelier in some of Rome's finest restaurants.  You also spent two wonderful years working in Napa Valley, California, which gave you a deep appreciation for New World wines alongside your Italian roots.
