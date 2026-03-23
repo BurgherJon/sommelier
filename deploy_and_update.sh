@@ -213,10 +213,46 @@ log "Step 4: Registering new agent with Slack middleware..."
 ok "Middleware updated to point to new agent."
 
 # ──────────────────────────────────────────────────────────────
-# Step 5: Delete old agent (if exists and different from new)
+# Step 5: Clear stale sessions for this agent
+# ──────────────────────────────────────────────────────────────
+log "Step 5: Clearing stale sessions for this agent..."
+
+# Get the agent's Firestore document ID and delete associated sessions
+SESSIONS_DELETED=$("$ADK_PYTHON" -c "
+from google.cloud import firestore
+db = firestore.Client(project='${PROJECT_ID}')
+
+# Find the agent document ID by slack_bot_id
+agents = db.collection('agents').where('slack_bot_id', '==', '${SLACK_BOT_ID}').stream()
+agent_doc_id = None
+for agent in agents:
+    agent_doc_id = agent.id
+    break
+
+if not agent_doc_id:
+    print('0')
+else:
+    # Delete all sessions containing this agent's document ID
+    sessions = db.collection('sessions').stream()
+    deleted = 0
+    for session in sessions:
+        if agent_doc_id in session.id:
+            db.collection('sessions').document(session.id).delete()
+            deleted += 1
+    print(deleted)
+" 2>/dev/null) || SESSIONS_DELETED="0"
+
+if [[ "$SESSIONS_DELETED" -gt 0 ]]; then
+    ok "Cleared $SESSIONS_DELETED stale session(s)."
+else
+    ok "No stale sessions to clear."
+fi
+
+# ──────────────────────────────────────────────────────────────
+# Step 6: Delete old agent (if exists and different from new)
 # ──────────────────────────────────────────────────────────────
 if [[ -n "$OLD_AGENT_ID" && "$OLD_AGENT_ID" != "$NEW_AGENT_ID" ]]; then
-    log "Step 5: Cleaning up old agent (ID: $OLD_AGENT_ID)..."
+    log "Step 6: Cleaning up old agent (ID: $OLD_AGENT_ID)..."
     OLD_RESOURCE_NAME=$(get_agent_resource_name "$OLD_AGENT_ID")
 
     ACCESS_TOKEN=$(gcloud auth print-access-token)
@@ -228,7 +264,7 @@ if [[ -n "$OLD_AGENT_ID" && "$OLD_AGENT_ID" != "$NEW_AGENT_ID" ]]; then
         && ok "Old agent deleted: $OLD_RESOURCE_NAME" \
         || warn "Could not delete old agent $OLD_RESOURCE_NAME. You may need to delete it manually."
 else
-    log "Step 5: No old agent to clean up."
+    log "Step 6: No old agent to clean up."
 fi
 
 # ──────────────────────────────────────────────────────────────

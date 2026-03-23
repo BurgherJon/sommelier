@@ -313,7 +313,9 @@ This requires adding the `users:read` scope to all Slack bot apps (including Sam
 - Subscribe to `message.im` events
 
 ### 3. Deploy
-- `deploy_and_update.sh` handles: deploy to Vertex AI, smoke test, register with middleware, clean up old version
+- `deploy_and_update.sh` handles: deploy to Vertex AI, smoke test, register with middleware, clear stale sessions, clean up old version
+
+**Session Cleanup:** When a new agent is deployed, existing user sessions in Firestore still reference the old Vertex AI session IDs. The deploy script automatically clears these stale sessions so users get fresh sessions on their next message. Without this step, users may experience errors or empty responses after a redeploy.
 
 ### 4. Git Setup
 - Initialize git repo in `sommelier/`
