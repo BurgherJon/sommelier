@@ -287,26 +287,38 @@ class MultimodalAgentWrapper:
             for img in images:
                 try:
                     img_bytes = base64.b64decode(img["data"])
-                    parts.append(types.Part.from_bytes(
+                    image_part = types.Part.from_bytes(
                         data=img_bytes,
                         mime_type=img["mime_type"]
-                    ))
+                    )
+                    parts.append(image_part)
+                    print(f"Added image part: {img['mime_type']}, {len(img_bytes)} bytes")
                 except Exception as e:
                     # Log error but continue - don't fail the whole request
                     print(f"Error processing image: {e}")
+                    import traceback
+                    traceback.print_exc()
 
-            # Pass parts list as the message
-            query_message = parts if parts else message
+            # Create Content object with the parts
+            query_message = types.Content(parts=parts, role='user') if parts else message
+            print(f"Created multimodal Content with {len(parts)} parts")
         else:
             # Text only - pass as string
             query_message = message
 
         # Delegate to underlying agent's stream_query
-        yield from self.agent.stream_query(
-            user_id=user_id,
-            session_id=session_id,
-            message=query_message,
-        )
+        print(f"Calling agent.stream_query with message type: {type(query_message)}")
+        try:
+            yield from self.agent.stream_query(
+                user_id=user_id,
+                session_id=session_id,
+                message=query_message,
+            )
+        except Exception as e:
+            print(f"Error in stream_query: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
 
 # Wrap the agent to add multimodal support
