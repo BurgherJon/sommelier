@@ -281,7 +281,7 @@ class MultimodalAgentWrapper:
 
             # Add text part first (if present)
             if message:
-                parts.append(types.Part.from_text(message))
+                parts.append(types.Part.from_text(text=message))
 
             # Add image parts
             for img in images:
