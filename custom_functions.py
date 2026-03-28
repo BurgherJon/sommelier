@@ -147,7 +147,12 @@ def view_image(gcs_uri: str, mime_type: str = "image/png") -> str:
 
     # Use Gemini to analyze the image
     try:
-        genai_client = genai.Client()
+        # Initialize client for us-central1 region where models are available
+        genai_client = genai.Client(
+            vertexai=True,
+            project=os.getenv('GOOGLE_CLOUD_PROJECT'),
+            location='us-central1'
+        )
 
         # Create the prompt for wine-focused image analysis
         prompt = """Analyze this image in detail. If it's a wine bottle or wine label, extract:
@@ -165,7 +170,7 @@ If it's something else wine-related, describe what you see.
 Be thorough and precise - this information will be used to identify wines."""
 
         response = genai_client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash-001",
             contents=[
                 {
                     "role": "user",
