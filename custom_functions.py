@@ -6,6 +6,8 @@ Provides memory, cellar inventory, and consumed wines management.
 from typing import List, Dict, Any
 from datetime import datetime
 import os
+from google.cloud import storage
+from google import genai
 from .sheet_utilities import get_sheets_connector, get_docs_connector
 
 
@@ -101,6 +103,84 @@ def update_sommelier_memory(updated_memory: str) -> Dict[str, Any]:
 
     connector = get_docs_connector()
     return connector.write_doc(doc_id, updated_memory)
+
+
+# ---------------------------------------------------------------------------
+# Image viewing tool
+# ---------------------------------------------------------------------------
+
+def view_image(gcs_uri: str, mime_type: str = "image/png") -> str:
+    """
+    View and analyze an image that the user has sent.
+
+    Downloads the image from Google Cloud Storage and uses Gemini Vision
+    to provide a detailed description of what the image contains. Use this
+    when you receive a message with [IMAGE: gcs_uri | mime_type] to see
+    what the user has shared.
+
+    Args:
+        gcs_uri: The GCS URI of the image (e.g., "gs://bucket/path/image.png")
+        mime_type: The MIME type of the image (e.g., "image/png", "image/jpeg")
+
+    Returns:
+        A detailed description of the image contents, optimized for wine-related
+        images (wine bottles, labels, wine lists, etc.)
+    """
+    # Parse GCS URI
+    if not gcs_uri.startswith("gs://"):
+        return f"Error: Invalid GCS URI format: {gcs_uri}"
+
+    parts = gcs_uri.replace("gs://", "").split("/", 1)
+    if len(parts) != 2:
+        return f"Error: Could not parse GCS URI: {gcs_uri}"
+
+    bucket_name, blob_name = parts[0], parts[1]
+
+    # Download image from GCS
+    try:
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        image_bytes = blob.download_as_bytes()
+    except Exception as e:
+        return f"Error downloading image from GCS: {e}"
+
+    # Use Gemini to analyze the image
+    try:
+        genai_client = genai.Client()
+
+        # Create the prompt for wine-focused image analysis
+        prompt = """Analyze this image in detail. If it's a wine bottle or wine label, extract:
+- Producer/Winery name
+- Wine name
+- Vintage year
+- Region/Appellation
+- Grape variety (if visible)
+- Any other text visible on the label
+
+If it's a wine list or menu, list all the wines you can see with their prices.
+
+If it's something else wine-related, describe what you see.
+
+Be thorough and precise - this information will be used to identify wines."""
+
+        response = genai_client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[
+                {
+                    "role": "user",
+                    "parts": [
+                        {"inline_data": {"data": image_bytes, "mime_type": mime_type}},
+                        {"text": prompt}
+                    ]
+                }
+            ]
+        )
+
+        return response.text
+
+    except Exception as e:
+        return f"Error analyzing image with Gemini: {e}"
 
 
 # ---------------------------------------------------------------------------

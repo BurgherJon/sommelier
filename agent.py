@@ -1,6 +1,4 @@
 import os
-import base64
-from typing import Generator, Any, Dict
 
 # Force model API calls to the global endpoint so preview models
 # (e.g. gemini-3.1-pro-preview) are accessible, even when the Agent Engine
@@ -10,7 +8,6 @@ os.environ['GOOGLE_CLOUD_LOCATION'] = 'global'
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
 from google.adk.tools.agent_tool import AgentTool
-from google.cloud import storage
 from google.genai import types
 
 from .custom_functions import (
@@ -31,6 +28,7 @@ from .custom_functions import (
     get_coravined_wines,
     mark_wine_coravined,
     unmark_wine_coravined,
+    view_image,
 )
 from .custom_agents import google_search_agent
 
@@ -63,6 +61,26 @@ _base_agent = Agent(
 
     If you encounter a SlackID you have never seen before, OR the user says they are new:
     - Trigger the NEW USER ONBOARDING flow.
+
+    === IMAGE HANDLING ===
+
+    When users send images via Slack, you will see a message starting with:
+    [IMAGE: gs://bucket/path/file.png | image/png]
+
+    IMMEDIATELY call view_image(gcs_uri, mime_type) to see what the user sent.
+    Extract the gcs_uri and mime_type from the [IMAGE: ...] line.
+
+    Example:
+    - User sends: "[IMAGE: gs://bucket/slack-files/abc123.jpg | image/jpeg]\n\nWhat do you think of this wine?"
+    - You call: view_image("gs://bucket/slack-files/abc123.jpg", "image/jpeg")
+    - The tool returns a description of the image
+    - You then respond based on what you learned
+
+    Common image types:
+    1. **Wine bottle photos**: Identify the wine, search Wine Searcher to confirm, then ask what they want to do (discuss, add to cellar, or review)
+    2. **Wine label close-ups**: Extract producer, wine name, vintage, region
+    3. **Wine list photos**: Parse all wines visible, cross-reference against their cellar and consumed wines, make recommendations
+    4. **Cork or capsule photos**: Comment on the condition, vintage if visible
 
     === NEW USER ONBOARDING ===
 
@@ -217,6 +235,7 @@ _base_agent = Agent(
     tools=[
         FunctionTool(get_sommelier_memory),
         FunctionTool(update_sommelier_memory),
+        FunctionTool(view_image),
         FunctionTool(get_cellar_inventory),
         FunctionTool(search_cellar),
         FunctionTool(add_wine_to_cellar),
@@ -237,109 +256,6 @@ _base_agent = Agent(
 )
 
 
-def load_image_bytes(img: dict) -> bytes:
-    """Load image bytes from either GCS URI or base64 data."""
-    if "gcs_uri" in img:
-        # Parse gs://bucket/path format
-        uri = img["gcs_uri"]
-        parts = uri.replace("gs://", "").split("/", 1)
-        bucket_name, blob_name = parts[0], parts[1]
-
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        return blob.download_as_bytes()
-    elif "data" in img:
-        # Base64 fallback
-        return base64.b64decode(img["data"])
-    else:
-        raise ValueError("Image must have either 'gcs_uri' or 'data' field")
-
-
-class MultimodalAgentWrapper:
-    """
-    Wrapper that adds image processing capability to an ADK Agent.
-
-    The middleware sends images with either:
-    - gcs_uri: GCS path to uploaded image (preferred for Agent Engine)
-    - data: base64-encoded image bytes (fallback)
-
-    This wrapper downloads images and builds multimodal content for the agent.
-    """
-
-    def __init__(self, agent: Agent):
-        self.agent = agent
-        # Expose agent attributes that Vertex AI might need
-        self.name = agent.name
-
-    def create_session(self, *, user_id: str) -> Dict[str, Any]:
-        """Delegate session creation to the underlying agent."""
-        return self.agent.create_session(user_id=user_id)
-
-    def stream_query(
-        self,
-        *,
-        user_id: str,
-        session_id: str = None,
-        message: str = "",
-        images: list = None,
-    ) -> Generator[Dict[str, Any], None, None]:
-        """
-        Process a query with optional images.
-
-        Args:
-            user_id: User identifier
-            session_id: Session identifier
-            message: Text message from user
-            images: Optional list of dicts with 'gcs_uri' or 'data', and 'mime_type'
-
-        Yields:
-            Response chunks from the agent
-        """
-        if images:
-            # Build multimodal content parts
-            content_parts = []
-
-            # Add image parts first (Gemini typically wants images before text)
-            for img in images:
-                try:
-                    image_bytes = load_image_bytes(img)
-                    content_parts.append(
-                        types.Part.from_bytes(
-                            data=image_bytes,
-                            mime_type=img["mime_type"]
-                        )
-                    )
-                    source = img.get("gcs_uri", "base64")
-                    print(f"Added image from {source}: {img['mime_type']}, {len(image_bytes)} bytes")
-                except Exception as e:
-                    print(f"Error processing image: {e}")
-
-            # Add text part
-            if message:
-                content_parts.append(types.Part.from_text(text=message))
-
-            # Create Content object with all parts
-            user_content = types.Content(
-                role="user",
-                parts=content_parts
-            )
-
-            print(f"Passing multimodal content with {len(content_parts)} parts to agent")
-            yield from self.agent.stream_query(
-                user_id=user_id,
-                session_id=session_id,
-                message=user_content,
-            )
-        else:
-            # Text only - pass as string
-            yield from self.agent.stream_query(
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-            )
-
-
-# Wrap the agent to add multimodal support
-# This is what gets deployed to Vertex AI
-root_agent = MultimodalAgentWrapper(_base_agent)
+# Export the agent directly
+# Image handling is done via the view_image() tool, not through multimodal messages
+root_agent = _base_agent
