@@ -1,4 +1,6 @@
 import os
+import base64
+from typing import Generator, Any, Dict
 
 # Force model API calls to the global endpoint so preview models
 # (e.g. gemini-3.1-pro-preview) are accessible, even when the Agent Engine
@@ -32,7 +34,7 @@ from .custom_functions import (
 from .custom_agents import google_search_agent
 
 
-root_agent = Agent(
+_base_agent = Agent(
     model=os.getenv('HIGH_QUALITY_AGENT_MODEL'),
     name='root_agent',
     generate_content_config=types.GenerateContentConfig(
@@ -232,3 +234,81 @@ root_agent = Agent(
         AgentTool(agent=google_search_agent),
     ]
 )
+
+
+class MultimodalAgentWrapper:
+    """
+    Wrapper that adds image processing capability to an ADK Agent.
+
+    The middleware sends images as base64-encoded data in an 'images' field.
+    This wrapper extracts those images, converts them to types.Part objects,
+    and passes them along with the text message to the underlying agent.
+    """
+
+    def __init__(self, agent: Agent):
+        self.agent = agent
+        # Expose agent attributes that Vertex AI might need
+        self.name = agent.name
+
+    def create_session(self, *, user_id: str) -> Dict[str, Any]:
+        """Delegate session creation to the underlying agent."""
+        return self.agent.create_session(user_id=user_id)
+
+    def stream_query(
+        self,
+        *,
+        user_id: str,
+        session_id: str = None,
+        message: str = "",
+        images: list = None,
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Process a query with optional images.
+
+        Args:
+            user_id: User identifier
+            session_id: Session identifier
+            message: Text message from user
+            images: Optional list of dicts with 'data' (base64) and 'mime_type'
+
+        Yields:
+            Response chunks from the agent
+        """
+        # Build message content as a list of Parts
+        if images:
+            # Multimodal: combine text and images
+            parts = []
+
+            # Add text part first (if present)
+            if message:
+                parts.append(types.Part.from_text(message))
+
+            # Add image parts
+            for img in images:
+                try:
+                    img_bytes = base64.b64decode(img["data"])
+                    parts.append(types.Part.from_bytes(
+                        data=img_bytes,
+                        mime_type=img["mime_type"]
+                    ))
+                except Exception as e:
+                    # Log error but continue - don't fail the whole request
+                    print(f"Error processing image: {e}")
+
+            # Pass parts list as the message
+            query_message = parts if parts else message
+        else:
+            # Text only - pass as string
+            query_message = message
+
+        # Delegate to underlying agent's stream_query
+        yield from self.agent.stream_query(
+            user_id=user_id,
+            session_id=session_id,
+            message=query_message,
+        )
+
+
+# Wrap the agent to add multimodal support
+# This is what gets deployed to Vertex AI
+root_agent = MultimodalAgentWrapper(_base_agent)
