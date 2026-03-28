@@ -10,6 +10,7 @@ os.environ['GOOGLE_CLOUD_LOCATION'] = 'global'
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
 from google.adk.tools.agent_tool import AgentTool
+from google.cloud import storage
 from google.genai import types
 
 from .custom_functions import (
@@ -236,13 +237,34 @@ _base_agent = Agent(
 )
 
 
+def load_image_bytes(img: dict) -> bytes:
+    """Load image bytes from either GCS URI or base64 data."""
+    if "gcs_uri" in img:
+        # Parse gs://bucket/path format
+        uri = img["gcs_uri"]
+        parts = uri.replace("gs://", "").split("/", 1)
+        bucket_name, blob_name = parts[0], parts[1]
+
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        return blob.download_as_bytes()
+    elif "data" in img:
+        # Base64 fallback
+        return base64.b64decode(img["data"])
+    else:
+        raise ValueError("Image must have either 'gcs_uri' or 'data' field")
+
+
 class MultimodalAgentWrapper:
     """
     Wrapper that adds image processing capability to an ADK Agent.
 
-    The middleware sends images as base64-encoded data in an 'images' field.
-    This wrapper extracts those images, converts them to types.Part objects,
-    and passes them along with the text message to the underlying agent.
+    The middleware sends images with either:
+    - gcs_uri: GCS path to uploaded image (preferred for Agent Engine)
+    - data: base64-encoded image bytes (fallback)
+
+    This wrapper downloads images and builds multimodal content for the agent.
     """
 
     def __init__(self, agent: Agent):
@@ -269,56 +291,53 @@ class MultimodalAgentWrapper:
             user_id: User identifier
             session_id: Session identifier
             message: Text message from user
-            images: Optional list of dicts with 'data' (base64) and 'mime_type'
+            images: Optional list of dicts with 'gcs_uri' or 'data', and 'mime_type'
 
         Yields:
             Response chunks from the agent
         """
-        # Build message content as a list of Parts
         if images:
-            # Multimodal: combine text and images
-            parts = []
+            # Build multimodal content parts
+            content_parts = []
 
-            # Add text part first (if present)
-            if message:
-                parts.append(types.Part.from_text(text=message))
-
-            # Add image parts
+            # Add image parts first (Gemini typically wants images before text)
             for img in images:
                 try:
-                    img_bytes = base64.b64decode(img["data"])
-                    image_part = types.Part.from_bytes(
-                        data=img_bytes,
-                        mime_type=img["mime_type"]
+                    image_bytes = load_image_bytes(img)
+                    content_parts.append(
+                        types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type=img["mime_type"]
+                        )
                     )
-                    parts.append(image_part)
-                    print(f"Added image part: {img['mime_type']}, {len(img_bytes)} bytes")
+                    source = img.get("gcs_uri", "base64")
+                    print(f"Added image from {source}: {img['mime_type']}, {len(image_bytes)} bytes")
                 except Exception as e:
-                    # Log error but continue - don't fail the whole request
                     print(f"Error processing image: {e}")
-                    import traceback
-                    traceback.print_exc()
 
-            # Create Content object with the parts
-            query_message = types.Content(parts=parts, role='user') if parts else message
-            print(f"Created multimodal Content with {len(parts)} parts")
-        else:
-            # Text only - pass as string
-            query_message = message
+            # Add text part
+            if message:
+                content_parts.append(types.Part.from_text(text=message))
 
-        # Delegate to underlying agent's stream_query
-        print(f"Calling agent.stream_query with message type: {type(query_message)}")
-        try:
+            # Create Content object with all parts
+            user_content = types.Content(
+                role="user",
+                parts=content_parts
+            )
+
+            print(f"Passing multimodal content with {len(content_parts)} parts to agent")
             yield from self.agent.stream_query(
                 user_id=user_id,
                 session_id=session_id,
-                message=query_message,
+                message=user_content,
             )
-        except Exception as e:
-            print(f"Error in stream_query: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+        else:
+            # Text only - pass as string
+            yield from self.agent.stream_query(
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+            )
 
 
 # Wrap the agent to add multimodal support
