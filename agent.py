@@ -29,6 +29,7 @@ from .custom_functions import (
     mark_wine_coravined,
     unmark_wine_coravined,
     view_image,
+    analyze_wine_list,
 )
 from .custom_agents import google_search_agent
 
@@ -76,11 +77,41 @@ _base_agent = Agent(
     - The tool returns a description of the image
     - You then respond based on what you learned
 
-    Common image types:
-    1. **Wine bottle photos**: Identify the wine, search Wine Searcher to confirm, then ask what they want to do (discuss, add to cellar, or review)
-    2. **Wine label close-ups**: Extract producer, wine name, vintage, region
-    3. **Wine list photos**: Parse all wines visible, cross-reference against their cellar and consumed wines, make recommendations
-    4. **Cork or capsule photos**: Comment on the condition, vintage if visible
+    **WINE BOTTLE IMAGE WORKFLOW**
+
+    When a user sends a photo of a wine bottle or label:
+    1. Call view_image() to analyze it and extract: Producer, Wine name, Vintage, Region
+    2. Search Wine Searcher using google_search_agent: "site:wine-searcher.com [Producer] [Wine] [Vintage]"
+    3. Evaluate your confidence:
+       - If ONE wine is clearly the match: Share the Wine Searcher link and say "I believe this is [Wine details]. Here's the Wine Searcher page: [link]. Is that correct?"
+       - If MULTIPLE wines could match: Present top 2-3 options with links: "I see a few possibilities: 1) [Wine A] - [link], 2) [Wine B] - [link]. Which one is it?"
+    4. After user confirms, ask what they'd like to do:
+       - **Learn about it**: Discuss the wine, suggest pairings, drinking window
+       - **Add to cellar**: Proceed with add_wine_to_cellar workflow using confirmed details
+       - **Review it**: Guide through Wine Folly tasting methodology, then add_tasting_note()
+
+    **WINE LIST IMAGE WORKFLOW**
+
+    When a user sends a photo of a restaurant wine list:
+    1. Call view_image() to parse all wines visible, extracting: Wine name, Vintage (if shown), Price, Region (if shown)
+    2. Build a list of wine dicts and call analyze_wine_list() to cross-reference against their history
+    3. Present findings grouped by relevance:
+       a) "Wines you've enjoyed before:" - wines with positive tasting notes/ratings
+       b) "Already in your cellar:" - wines matching inventory (note your purchase price for comparison)
+       c) "From the same regions in your cellar:" - bottles they own from regions featured on the list (useful context even if not the same wine)
+       d) "New wines that might suit you:" - based on user's preferences from memory
+    4. For your top 5 recommendations, use google_search_agent to search Wine Searcher for each wine's retail price (e.g. "site:wine-searcher.com [Producer] [Wine] [Vintage] price").  Compare the list price to the Wine Searcher average and note which wines are well-priced vs overpriced.  A typical restaurant markup is 2-3x retail — anything less is a good value.
+    5. Make specific recommendations considering:
+       - Value assessment — highlight wines priced fairly compared to Wine Searcher
+       - User's typical spending range from their preference profile
+       - The occasion — ask what they're eating if not mentioned
+       - Regional context — if they have wines from a featured region in their cellar, mention it
+
+    **OTHER IMAGE TYPES**
+
+    - **Cork or capsule photos**: Comment on the condition, vintage if visible
+    - **Vineyard photos**: Share what you know about the region, ask about their visit
+    - **Wine glass photos**: Comment on color/legs if visible, ask about the wine
 
     === NEW USER ONBOARDING ===
 
@@ -236,6 +267,7 @@ _base_agent = Agent(
         FunctionTool(get_sommelier_memory),
         FunctionTool(update_sommelier_memory),
         FunctionTool(view_image),
+        FunctionTool(analyze_wine_list),
         FunctionTool(get_cellar_inventory),
         FunctionTool(search_cellar),
         FunctionTool(add_wine_to_cellar),

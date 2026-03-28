@@ -1116,3 +1116,291 @@ def unmark_wine_coravined(row_number: int) -> Dict[str, Any]:
         'Coravined': '',
         'CoravinedDate': '',
     })
+
+
+# ---------------------------------------------------------------------------
+# Wine list analysis tools
+# ---------------------------------------------------------------------------
+
+def _normalize_wine_name(name: str) -> str:
+    """Normalize wine name for fuzzy matching."""
+    # Common abbreviations to expand
+    abbrevs = {
+        'ch.': 'chateau',
+        'ch ': 'chateau ',
+        'dom.': 'domaine',
+        'dom ': 'domaine ',
+        'cht.': 'chateau',
+        'cht ': 'chateau ',
+        'vyd.': 'vineyard',
+        'vyd ': 'vineyard ',
+        'vnyd.': 'vineyard',
+        'vnyd ': 'vineyard ',
+        'est.': 'estate',
+        'est ': 'estate ',
+        'res.': 'reserve',
+        'res ': 'reserve ',
+        'rsv.': 'reserve',
+        'rsv ': 'reserve ',
+        'cab.': 'cabernet',
+        'cab ': 'cabernet ',
+        'sauv.': 'sauvignon',
+        'sauv ': 'sauvignon ',
+        'chard.': 'chardonnay',
+        'chard ': 'chardonnay ',
+        'p.n.': 'pinot noir',
+        'pn ': 'pinot noir ',
+    }
+
+    normalized = name.lower().strip()
+    for abbrev, full in abbrevs.items():
+        normalized = normalized.replace(abbrev, full)
+
+    # Remove common filler words and punctuation
+    for word in ['the', 'di', 'de', 'del', 'della', 'delle', 'du', 'des', 'le', 'la', 'les']:
+        normalized = normalized.replace(f' {word} ', ' ')
+
+    # Remove punctuation
+    for char in ".,'-\"()[]":
+        normalized = normalized.replace(char, ' ')
+
+    # Collapse multiple spaces
+    while '  ' in normalized:
+        normalized = normalized.replace('  ', ' ')
+
+    return normalized.strip()
+
+
+def _fuzzy_match_score(wine1: str, wine2: str) -> float:
+    """Calculate fuzzy match score between two wine names (0-1)."""
+    norm1 = _normalize_wine_name(wine1)
+    norm2 = _normalize_wine_name(wine2)
+
+    # Exact match after normalization
+    if norm1 == norm2:
+        return 1.0
+
+    # Check if one contains the other
+    if norm1 in norm2 or norm2 in norm1:
+        return 0.9
+
+    # Word-based overlap
+    words1 = set(norm1.split())
+    words2 = set(norm2.split())
+
+    if not words1 or not words2:
+        return 0.0
+
+    common = words1 & words2
+    total = words1 | words2
+
+    # Jaccard similarity
+    return len(common) / len(total)
+
+
+def analyze_wine_list(wines: List[Dict[str, str]]) -> Dict[str, Any]:
+    """
+    Cross-reference a parsed wine list against the user's history.
+
+    Call this after using view_image() on a wine list photo. Pass the wines
+    you extracted from the image, and this function will identify which ones
+    the user has consumed before, owns in their cellar, or has tasting notes for.
+    It will also find bottles in the cellar from the same regions as wines on
+    the list.
+
+    Args:
+        wines: List of dicts with keys:
+               - name: Wine name (required)
+               - vintage: Vintage year (optional)
+               - price: Price on the list (optional)
+               - producer: Producer name (optional)
+               - region: Wine region (optional, if visible on the list)
+
+    Returns:
+        Dictionary with:
+        - wines_consumed: List of wines the user has had before, with their
+                          ratings and notes if available
+        - wines_in_cellar: List of wines the user currently owns, with
+                           cellar location and purchase price
+        - wines_with_notes: List of wines with tasting notes
+        - wines_same_region: Bottles in the cellar from the same regions as
+                             wines on the list (grouped by region)
+        - wines_unknown: List of wines with no history
+        - match_threshold: The similarity threshold used (0.6)
+    """
+    MATCH_THRESHOLD = 0.6
+
+    # Get user's wine history
+    cellar = get_cellar_inventory()
+    consumed = get_consumed_wines()
+    notes = get_tasting_notes()
+
+    # Track regions found on the wine list (from input or from matches)
+    regions_on_list = set()
+
+    results = {
+        'wines_consumed': [],
+        'wines_in_cellar': [],
+        'wines_with_notes': [],
+        'wines_same_region': {},  # region -> list of cellar wines
+        'wines_unknown': [],
+        'match_threshold': MATCH_THRESHOLD,
+        'total_wines_analyzed': len(wines),
+    }
+
+    for wine in wines:
+        wine_name = wine.get('name', '')
+        vintage = wine.get('vintage', '')
+        price = wine.get('price', '')
+        producer = wine.get('producer', '')
+        region = wine.get('region', '')
+
+        if not wine_name:
+            continue
+
+        # Track region if provided on the list
+        if region:
+            regions_on_list.add(region.lower().strip())
+
+        # Build search string including producer if available
+        search_name = f"{producer} {wine_name}".strip() if producer else wine_name
+
+        found_in_cellar = False
+        found_consumed = False
+        found_notes = False
+
+        # Check cellar inventory
+        for cellar_wine in cellar.get('wines', []):
+            cellar_name = f"{cellar_wine.get('Producer', '')} {cellar_wine.get('Wine', '')}".strip()
+            cellar_vintage = cellar_wine.get('Vintage', '')
+
+            score = _fuzzy_match_score(search_name, cellar_name)
+
+            # Also check vintage if provided
+            vintage_match = not vintage or not cellar_vintage or vintage == cellar_vintage
+
+            if score >= MATCH_THRESHOLD and vintage_match:
+                found_in_cellar = True
+                # Capture region from matched cellar wine
+                cellar_region = cellar_wine.get('Region', '')
+                if cellar_region:
+                    regions_on_list.add(cellar_region.lower().strip())
+
+                results['wines_in_cellar'].append({
+                    'list_wine': wine_name,
+                    'list_vintage': vintage,
+                    'list_price': price,
+                    'cellar_wine': cellar_wine.get('Wine', ''),
+                    'cellar_producer': cellar_wine.get('Producer', ''),
+                    'cellar_vintage': cellar_vintage,
+                    'cellar_region': cellar_region,
+                    'cellar_location': cellar_wine.get('Location', ''),
+                    'cellar_value': cellar_wine.get('Value', ''),
+                    'match_score': round(score, 2),
+                })
+                break
+
+        # Check consumed wines
+        for consumed_wine in consumed.get('wines', []):
+            consumed_name = consumed_wine.get('Wine', '')
+            consumed_vintage = consumed_wine.get('Vintage', '')
+
+            score = _fuzzy_match_score(search_name, consumed_name)
+            vintage_match = not vintage or not consumed_vintage or vintage == consumed_vintage
+
+            if score >= MATCH_THRESHOLD and vintage_match:
+                found_consumed = True
+                # Capture region from matched consumed wine
+                consumed_region = consumed_wine.get('Region', '')
+                if consumed_region:
+                    regions_on_list.add(consumed_region.lower().strip())
+
+                results['wines_consumed'].append({
+                    'list_wine': wine_name,
+                    'list_vintage': vintage,
+                    'list_price': price,
+                    'consumed_wine': consumed_name,
+                    'consumed_vintage': consumed_vintage,
+                    'consumed_region': consumed_region,
+                    'consumed_date': consumed_wine.get('Consumed', ''),
+                    'consumption_note': consumed_wine.get('ConsumptionNote', ''),
+                    'match_score': round(score, 2),
+                })
+                break
+
+        # Check tasting notes
+        for note in notes.get('notes', []):
+            note_wine = note.get('Wine', '')
+            note_vintage = note.get('Vintage', '')
+
+            score = _fuzzy_match_score(search_name, note_wine)
+            vintage_match = not vintage or not note_vintage or vintage == note_vintage
+
+            if score >= MATCH_THRESHOLD and vintage_match:
+                found_notes = True
+                # Capture region from matched tasting note
+                note_region = note.get('Region', '')
+                if note_region:
+                    regions_on_list.add(note_region.lower().strip())
+
+                results['wines_with_notes'].append({
+                    'list_wine': wine_name,
+                    'list_vintage': vintage,
+                    'list_price': price,
+                    'note_wine': note_wine,
+                    'note_vintage': note_vintage,
+                    'note_region': note_region,
+                    'reviewer': note.get('Reviewer', ''),
+                    'rating': note.get('Rating', ''),
+                    'tasting_notes': note.get('TastingNotes', ''),
+                    'match_score': round(score, 2),
+                })
+                break
+
+        # If not found anywhere, add to unknown
+        if not found_in_cellar and not found_consumed and not found_notes:
+            results['wines_unknown'].append({
+                'list_wine': wine_name,
+                'list_vintage': vintage,
+                'list_price': price,
+                'list_region': region,
+            })
+
+    # Find cellar wines from the same regions as wines on the list
+    # (but exclude wines already matched directly)
+    matched_cellar_wines = {
+        (w.get('cellar_wine', ''), w.get('cellar_vintage', ''), w.get('cellar_producer', ''))
+        for w in results['wines_in_cellar']
+    }
+
+    for cellar_wine in cellar.get('wines', []):
+        cellar_region = cellar_wine.get('Region', '').lower().strip()
+        if not cellar_region or cellar_region not in regions_on_list:
+            continue
+
+        # Skip if this wine was already directly matched
+        wine_key = (
+            cellar_wine.get('Wine', ''),
+            cellar_wine.get('Vintage', ''),
+            cellar_wine.get('Producer', '')
+        )
+        if wine_key in matched_cellar_wines:
+            continue
+
+        # Add to regional matches, grouped by region
+        display_region = cellar_wine.get('Region', '')
+        if display_region not in results['wines_same_region']:
+            results['wines_same_region'][display_region] = []
+
+        results['wines_same_region'][display_region].append({
+            'wine': cellar_wine.get('Wine', ''),
+            'producer': cellar_wine.get('Producer', ''),
+            'vintage': cellar_wine.get('Vintage', ''),
+            'varietal': cellar_wine.get('Varietal', ''),
+            'location': cellar_wine.get('Location', ''),
+            'value': cellar_wine.get('Value', ''),
+            'begin_consume': cellar_wine.get('BeginConsume', ''),
+            'end_consume': cellar_wine.get('EndConsume', ''),
+        })
+
+    return results
