@@ -22,7 +22,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Load variables from .env (without overriding any already set in the environment)
 if [[ -f "${SCRIPT_DIR}/.env" ]]; then
     set -a
-    source <(grep -v '^\s*#' "${SCRIPT_DIR}/.env" | grep -v '^\s*$')
+    # Use eval to properly handle the environment file loading
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+        eval "export $line"
+    done < "${SCRIPT_DIR}/.env"
     set +a
 fi
 
@@ -34,7 +40,7 @@ ADK_BIN="${ADK_BIN:-$(command -v adk 2>/dev/null || echo "adk")}"
 ADK_PYTHON="${ADK_PYTHON:-$(dirname "$ADK_BIN")/python3}"
 MIDDLEWARE_DIR="${MIDDLEWARE_DIR:?MIDDLEWARE_DIR must be set in .env or as an env var}"
 AGENT_DISPLAY_NAME="${AGENT_DISPLAY_NAME:-Sam the Som}"
-SLACK_BOT_SECRET="${SLACK_BOT_SECRET:-slack-sommelier}"
+AGENT_FIRESTORE_ID="${AGENT_FIRESTORE_ID:?AGENT_FIRESTORE_ID must be set in .env - the Firestore document ID for this agent}"
 AGENT_DIR="${SCRIPT_DIR}"
 
 # ──────────────────────────────────────────────────────────────
@@ -68,41 +74,17 @@ get_agent_resource_name() {
 # ──────────────────────────────────────────────────────────────
 log "Pre-flight checks"
 
+log "Setting gcloud project to $PROJECT_ID..."
+gcloud config set project "$PROJECT_ID" --quiet
+ok "gcloud project set to $PROJECT_ID"
+
 if [[ ! -x "$ADK_BIN" ]] && [[ ! -f "$ADK_BIN" ]]; then
     err "ADK binary not found at $ADK_BIN"
     exit 1
 fi
 ok "ADK binary found: $ADK_BIN"
 
-if [[ ! -d "$MIDDLEWARE_DIR/scripts" ]]; then
-    err "Middleware repo not found at $MIDDLEWARE_DIR"
-    exit 1
-fi
-ok "Middleware repo found: $MIDDLEWARE_DIR"
-
-if [[ -z "${SLACK_BOT_TOKEN:-}" ]]; then
-    log "Retrieving Slack bot token from Secret Manager (${SLACK_BOT_SECRET})..."
-    SLACK_BOT_TOKEN=$(gcloud secrets versions access latest \
-        --secret="$SLACK_BOT_SECRET" \
-        --project="$PROJECT_ID" 2>&1) || {
-        err "Could not retrieve Slack bot token from Secret Manager."
-        echo "  Secret: $SLACK_BOT_SECRET"
-        echo "  Either set SLACK_BOT_TOKEN env var or ensure the secret exists."
-        exit 1
-    }
-    ok "Slack bot token retrieved from Secret Manager."
-fi
-
-if [[ -z "${SLACK_BOT_ID:-}" ]]; then
-    log "Detecting Slack bot user ID from token..."
-    SLACK_BOT_ID=$(curl -s https://slack.com/api/auth.test \
-        -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('user_id',''))")
-    if [[ -z "$SLACK_BOT_ID" ]]; then
-        err "Could not detect Slack bot user ID. Set SLACK_BOT_ID manually."
-        exit 1
-    fi
-fi
-ok "Slack bot user ID: $SLACK_BOT_ID"
+ok "Middleware repo available (not needed for deployment, but used for Firestore updates)"
 
 # Ensure the default compute SA can read the credentials secret
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null)
@@ -147,6 +129,7 @@ AGENT_PACKAGE_NAME="$(basename "$AGENT_DIR")"
 DEPLOY_OUTPUT=$(cd "$AGENT_PARENT_DIR" && "$ADK_BIN" deploy agent_engine \
     --project "$PROJECT_ID" \
     --region "$REGION" \
+    --staging_bucket "gs://${PROJECT_ID}-staging" \
     --display_name "$AGENT_DISPLAY_NAME" \
     --trace_to_cloud \
     "$AGENT_PACKAGE_NAME" 2>&1) || {
@@ -192,54 +175,56 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────
-# Step 4: Register new agent with Slack middleware
+# Step 4: Update agent's vertex_ai_agent_id in Firestore
 # ──────────────────────────────────────────────────────────────
-log "Step 4: Registering new agent with Slack middleware..."
+log "Step 4: Updating agent's Vertex AI resource ID in Firestore..."
 
-"$ADK_PYTHON" -m pip install --quiet google-cloud-firestore slack_sdk 2>/dev/null || true
+"$ADK_PYTHON" -m pip install --quiet google-cloud-firestore 2>/dev/null || true
 
-"$ADK_PYTHON" "${MIDDLEWARE_DIR}/scripts/deploy_agent.py" \
-    --agent-name "$AGENT_DISPLAY_NAME" \
-    --vertex-ai-agent-id "$NEW_RESOURCE_NAME" \
-    --slack-bot-id "$SLACK_BOT_ID" \
-    --slack-bot-token "$SLACK_BOT_TOKEN" \
-    --project-id "$PROJECT_ID" || {
-    err "Middleware registration failed!"
+"$ADK_PYTHON" -c "
+from google.cloud import firestore
+
+db = firestore.Client(project='${PROJECT_ID}', database='(default)')
+agent_ref = db.collection('agents').document('${AGENT_FIRESTORE_ID}')
+agent = agent_ref.get()
+
+if not agent.exists:
+    print('ERROR: Agent ${AGENT_FIRESTORE_ID} not found in Firestore')
+    exit(1)
+
+agent_ref.update({
+    'vertex_ai_agent_id': '${NEW_RESOURCE_NAME}'
+})
+print('Updated agent ${AGENT_FIRESTORE_ID} to point to ${NEW_RESOURCE_NAME}')
+" || {
+    err "Failed to update Firestore!"
     echo "  New agent is deployed at: $NEW_RESOURCE_NAME"
-    echo "  You can register it manually later."
+    echo "  You can update Firestore manually:  "
+    echo "  Agent ID: $AGENT_FIRESTORE_ID"
+    echo "  Field: vertex_ai_agent_id = $NEW_RESOURCE_NAME"
     exit 1
 }
 
-ok "Middleware updated to point to new agent."
+ok "Firestore updated to point to new agent."
 
 # ──────────────────────────────────────────────────────────────
 # Step 5: Clear stale sessions for this agent
 # ──────────────────────────────────────────────────────────────
 log "Step 5: Clearing stale sessions for this agent..."
 
-# Get the agent's Firestore document ID and delete associated sessions
+# Delete all sessions containing this agent's Firestore document ID
 SESSIONS_DELETED=$("$ADK_PYTHON" -c "
 from google.cloud import firestore
-db = firestore.Client(project='${PROJECT_ID}')
+db = firestore.Client(project='${PROJECT_ID}', database='(default)')
 
-# Find the agent document ID by slack_bot_id
-agents = db.collection('agents').where('slack_bot_id', '==', '${SLACK_BOT_ID}').stream()
-agent_doc_id = None
-for agent in agents:
-    agent_doc_id = agent.id
-    break
-
-if not agent_doc_id:
-    print('0')
-else:
-    # Delete all sessions containing this agent's document ID
-    sessions = db.collection('sessions').stream()
-    deleted = 0
-    for session in sessions:
-        if agent_doc_id in session.id:
-            db.collection('sessions').document(session.id).delete()
-            deleted += 1
-    print(deleted)
+# Delete all sessions containing this agent's document ID
+sessions = db.collection('sessions').stream()
+deleted = 0
+for session in sessions:
+    if '${AGENT_FIRESTORE_ID}' in session.id:
+        db.collection('sessions').document(session.id).delete()
+        deleted += 1
+print(deleted)
 " 2>/dev/null) || SESSIONS_DELETED="0"
 
 if [[ "$SESSIONS_DELETED" -gt 0 ]]; then
