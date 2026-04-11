@@ -1,0 +1,21 @@
+# Copy this file to terraform.tfvars and fill in your values
+# terraform.tfvars is git-ignored to keep your configuration private
+
+# GCP Project Configuration
+project_id       = "sam-sommelier-chat-prod"    # Must be globally unique
+project_name     = "Sam Sommelier Google Chat"
+organization_id  = "123456789012"                # Your GCP org ID
+billing_account  = "ABCD12-34EF56-7890AB"        # Your billing account ID
+region           = "us-central1"
+
+# Bot Configuration
+bot_name         = "Sam the Sommelier"
+bot_account_id   = "sam-sommelier"               # lowercase, hyphens only, max 30 chars
+bot_description  = "Your personal wine expert and sommelier"
+bot_avatar_url   = ""                            # Optional: URL to bot avatar image
+
+# Secret Manager Configuration
+secret_name      = "sommelier-credentials"       # Name in this project's Secret Manager
+
+# Middleware Configuration
+middleware_project_number = "123456789012"       # Project number of vertex-ai-middleware-prod (for secret access)

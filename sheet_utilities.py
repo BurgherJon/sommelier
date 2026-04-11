@@ -101,10 +101,11 @@ def _load_credentials(credentials_path: Optional[str] = None, scopes: Optional[L
     ]
 
     secret_name = os.getenv('SOMMELIER_SECRET_NAME')
-    project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+    # Use dedicated secret project if specified, otherwise fall back to GOOGLE_CLOUD_PROJECT
+    secret_project_id = os.getenv('SOMMELIER_SECRET_PROJECT_ID') or os.getenv('GOOGLE_CLOUD_PROJECT')
 
-    if secret_name and project_id:
-        credentials_json = get_secret_from_secret_manager(project_id, secret_name)
+    if secret_name and secret_project_id:
+        credentials_json = get_secret_from_secret_manager(secret_project_id, secret_name)
         credentials_info = json.loads(credentials_json)
         return service_account.Credentials.from_service_account_info(
             credentials_info, scopes=scopes

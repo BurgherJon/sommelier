@@ -1,0 +1,40 @@
+# ADK File Exclusion Configuration
+# ADK uses .ae_ignore (NOT .adkignore or .gcloudignore)
+# This file prevents unnecessary files from being deployed
+
+# Git repository
+.git
+.git/
+.git/**
+
+# Python cache
+__pycache__
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment files
+.env
+.env.*
+
+# Credentials
+credentials/
+*.json
+!requirements.txt
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation and planning (optional, uncomment if you don't want to deploy these)
+# PLAN.md
+# README.md

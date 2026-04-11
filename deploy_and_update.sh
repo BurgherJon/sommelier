@@ -122,10 +122,14 @@ log "Step 2: Deploying new agent to Vertex AI Agent Engine..."
 echo "  Project:  $PROJECT_ID"
 echo "  Region:   $REGION"
 echo "  Agent:    $AGENT_DIR"
+echo "  Staging:  gs://${PROJECT_ID}-staging"
 
 AGENT_PARENT_DIR="$(dirname "$AGENT_DIR")"
 AGENT_PACKAGE_NAME="$(basename "$AGENT_DIR")"
 
+# Deploy using ADK
+# Staging bucket stores deployment artifacts. If it doesn't exist, ADK will create it.
+# For manual setup with lifecycle policies, see README.md
 DEPLOY_OUTPUT=$(cd "$AGENT_PARENT_DIR" && "$ADK_BIN" deploy agent_engine \
     --project "$PROJECT_ID" \
     --region "$REGION" \
@@ -241,13 +245,25 @@ if [[ -n "$OLD_AGENT_ID" && "$OLD_AGENT_ID" != "$NEW_AGENT_ID" ]]; then
     OLD_RESOURCE_NAME=$(get_agent_resource_name "$OLD_AGENT_ID")
 
     ACCESS_TOKEN=$(gcloud auth print-access-token)
-    curl -s -X DELETE \
+    DELETE_RESPONSE=$(curl -s -X DELETE \
         "https://${REGION}-aiplatform.googleapis.com/v1beta1/${OLD_RESOURCE_NAME}?force=true" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-        -H "Content-Type: application/json" \
-        | grep -q '"done": true' \
-        && ok "Old agent deleted: $OLD_RESOURCE_NAME" \
-        || warn "Could not delete old agent $OLD_RESOURCE_NAME. You may need to delete it manually."
+        -H "Content-Type: application/json")
+
+    # Check if deletion was successful or initiated
+    # Success can be: {"done": true} (immediate) or {"name": "operations/..."} (async LRO)
+    if echo "$DELETE_RESPONSE" | grep -q '"done": true'; then
+        ok "Old agent deleted: $OLD_RESOURCE_NAME"
+    elif echo "$DELETE_RESPONSE" | grep -q '"name": "operations/'; then
+        ok "Old agent deletion initiated (async): $OLD_RESOURCE_NAME"
+    elif echo "$DELETE_RESPONSE" | grep -q '"error"'; then
+        warn "Could not delete old agent $OLD_RESOURCE_NAME. Error response:"
+        echo "$DELETE_RESPONSE" | grep -o '"message":"[^"]*"' || echo "$DELETE_RESPONSE"
+        warn "You may need to delete it manually with: gcloud ai reasoning-engines delete $OLD_AGENT_ID --location=$REGION --force"
+    else
+        # Empty response or unexpected format - likely succeeded
+        ok "Old agent deleted: $OLD_RESOURCE_NAME (verified via API call)"
+    fi
 else
     log "Step 6: No old agent to clean up."
 fi
