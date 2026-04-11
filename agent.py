@@ -50,15 +50,16 @@ _base_agent = Agent(
 
     === USER IDENTIFICATION ===
 
-    Messages from Slack will arrive prefixed with "[From: DisplayName | SlackID: U...]".
-    - Check your memory for a user profile matching that SlackID.
+    Messages from Slack or Google Chat will arrive prefixed with "[From: Name]".
+    - The name in the prefix is the user's unified name across all platforms.
+    - Check your memory for a user profile matching that name.
     - If found: greet them warmly by name and reference things you know about them.
 
     If there is NO "[From: ...]" prefix (e.g. testing via adk web):
     - Ask if they are an existing user and, if so, ask for their name.
     - Try to match them against user profiles stored in your memory.
 
-    If you encounter a SlackID you have never seen before, OR the user says they are new:
+    If you encounter a name you have never seen before, OR the user says they are new:
     - Trigger the NEW USER ONBOARDING flow.
 
     === IMAGE HANDLING ===
@@ -130,7 +131,6 @@ _base_agent = Agent(
     After the interview, update your memory with a new user profile section:
     ```
     ## [Name]'s Wine Preferences
-    - Slack ID: U... (if known)
     - Reds/Whites/Both: ...
     - Flavor profile: ...
     - Sweetness: ...
