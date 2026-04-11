@@ -1,12 +1,13 @@
 # Sam the Sommelier - Dedicated Infrastructure
 #
 # This creates dedicated GCP infrastructure for Sam the Sommelier.
-# Based on the middleware template with Google Chat section uncommented.
+# Based on the middleware template with multi-platform support.
 #
 # STRUCTURE:
 # Section 1: Common infrastructure (all agents)
-# Section 2: Slack-specific infrastructure (commented - not using Slack)
+# Section 2: Slack-specific infrastructure (UNCOMMENTED - Sam uses Slack)
 # Section 3: Google Chat-specific infrastructure (UNCOMMENTED - Sam uses Google Chat)
+# Section 4: Telegram-specific infrastructure (UNCOMMENTED - Sam uses Telegram)
 
 terraform {
   required_version = ">= 1.0"
@@ -186,6 +187,51 @@ resource "google_secret_manager_secret_iam_member" "middleware_reasoning_engine_
 }
 
 # ==============================================================================
+# SECTION 4: TELEGRAM-SPECIFIC INFRASTRUCTURE
+# UNCOMMENTED - Sam uses Telegram
+# ==============================================================================
+
+# Telegram Bot Token Secret
+resource "google_secret_manager_secret" "telegram_bot_token" {
+  project   = data.google_project.agent_project.project_id
+  secret_id = "${var.bot_account_id}-telegram-token"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [
+    google_project_service.secretmanager
+  ]
+}
+
+# Grant middleware service accounts access to the Telegram token
+resource "google_secret_manager_secret_iam_member" "telegram_middleware_compute_access" {
+  project   = data.google_project.agent_project.project_id
+  secret_id = google_secret_manager_secret.telegram_bot_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${var.middleware_project_number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_secret_manager_secret_iam_member" "telegram_middleware_aiplatform_access" {
+  project   = data.google_project.agent_project.project_id
+  secret_id = google_secret_manager_secret.telegram_bot_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:service-${var.middleware_project_number}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+}
+
+resource "google_secret_manager_secret_iam_member" "telegram_middleware_reasoning_engine_access" {
+  project   = data.google_project.agent_project.project_id
+  secret_id = google_secret_manager_secret.telegram_bot_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:service-${var.middleware_project_number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+}
+
+# Note: The Telegram bot token must be added manually after terraform apply:
+# echo -n "YOUR_TELEGRAM_BOT_TOKEN" | gcloud secrets versions add ${var.bot_account_id}-telegram-token \
+#   --data-file=- --project=${var.project_id}
+
+# ==============================================================================
 # OUTPUTS
 # ==============================================================================
 
@@ -212,7 +258,7 @@ output "next_steps" {
 
 SECTION 1: COMMON SETUP
 
-1. Review what sections are uncommented in main.tf (Both Slack and Google Chat are enabled for Sam)
+1. Review what sections are uncommented in main.tf (Slack, Google Chat, and Telegram are enabled for Sam)
 
 SECTION 2: SLACK SETUP (if using)
 
@@ -278,9 +324,41 @@ SECTION 3: GOOGLE CHAT SETUP
       --secret-name ${var.secret_name} \
       --google-chat-project-id ${var.project_id}
 
-SECTION 4: GOOGLE APIS SETUP (Share Google Drive/Sheets)
+SECTION 4: TELEGRAM SETUP
 
-4a. Share Google Sheets/Drive files with the Google APIs service account:
+4a. Create Telegram bot via BotFather:
+    - Open Telegram and message @BotFather
+    - Send command: /newbot
+    - Follow prompts to choose name (e.g., "Sam the Sommelier") and username (e.g., "sam_sommelier_bot")
+    - Copy the bot token (format: 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz)
+
+4b. Store the Telegram bot token in Secret Manager:
+    echo -n "YOUR_TELEGRAM_BOT_TOKEN" | gcloud secrets versions add ${var.bot_account_id}-telegram-token \
+      --data-file=- \
+      --project=${var.project_id}
+
+    CRITICAL: The IAM bindings for middleware access are already configured by terraform!
+
+4c. Set Telegram webhook:
+    # Generate a random secret token for webhook verification
+    export WEBHOOK_SECRET=$$(openssl rand -base64 32)
+
+    # Set the webhook
+    curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "url": "https://slack-vertex-middleware-404939446326.us-central1.run.app/api/v1/telegram/events",
+        "secret_token": "'$$WEBHOOK_SECRET'"
+      }'
+
+    # Save the webhook secret for agent configuration in Firestore
+    echo "Webhook secret: $$WEBHOOK_SECRET"
+
+4d. Enable Telegram for your agent in middleware (use Firestore console or script)
+
+SECTION 5: GOOGLE APIS SETUP (Share Google Drive/Sheets)
+
+5a. Share Google Sheets/Drive files with the Google APIs service account:
     Service Account Email: ${google_service_account.agent_apis.email}
 
     Instructions:

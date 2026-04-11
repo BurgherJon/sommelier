@@ -8,7 +8,9 @@ An AI sommelier agent built with Google's Agent Development Kit (ADK) and deploy
 - **Tasting Notes**: Record and retrieve tasting notes for wines
 - **Wine Recommendations**: Get personalized wine recommendations
 - **Consumption Tracking**: Log wines as you drink them
-- **Slack Integration**: Interact with Sam directly in Slack
+- **Multi-Platform**: Available on Slack, Google Chat, and Telegram
+- **Cross-Platform Identity**: Same conversation across all platforms
+- **Image Analysis**: Send photos of wine bottles or restaurant wine lists
 
 ## Prerequisites
 
@@ -292,13 +294,50 @@ for agent in agents:
 "
 ```
 
+## Platform Setup
+
+Sam is available on multiple platforms: Slack, Google Chat, and Telegram.
+
+### Telegram Setup
+
+Sam is available on Telegram (bot username not public - contact maintainer for access).
+
+#### Infrastructure
+The Telegram bot infrastructure is managed via terraform in `google-chat-terraform/`:
+- **Bot token secret**: `sam-sommelier-telegram-token` (in agent's GCP project)
+- **Webhook**: Points to middleware at `/api/v1/telegram/events`
+- **IAM access**: Middleware service accounts automatically granted access via terraform
+
+#### Testing Telegram
+1. Open Telegram and search for the bot (username provided privately)
+2. Start a chat and send: "Hello Sam!"
+3. Sam should recognize you and respond with his Italian sommelier personality
+
+All features work across platforms:
+- Wine cellar management
+- Image analysis (wine bottles, wine lists)
+- Tasting notes
+- Recommendations
+- Memory persistence
+
 ## Testing
 
-After deployment, test Sam in Slack:
+After deployment, test Sam on any platform:
 
+**Slack:**
 1. Send a direct message to the Sam bot
 2. Try: "What wines do I have in my cellar?"
 3. Try: "Recommend a wine for steak"
+
+**Google Chat:**
+1. Search for "Sam the Sommelier" in Google Chat
+2. Start a 1:1 conversation
+3. Test the same commands as Slack
+
+**Telegram:**
+1. Search for the bot (username provided privately)
+2. Send "/start" to begin
+3. Test the same commands as other platforms
 
 ## Monitoring
 
@@ -379,7 +418,10 @@ sommelier/
 - Never commit `.env` files or credentials to git
 - Use Secret Manager for all sensitive data
 - Service account keys are stored in Secret Manager (sommelier-credentials)
-- Slack bot tokens are stored in Secret Manager (slack-sommelier)
+- Platform bot tokens stored in Secret Manager:
+  - Slack: `sam-sommelier-slack-token`
+  - Telegram: `sam-sommelier-telegram-token`
+  - Google Chat: Service account key in `sommelier-credentials`
 
 ## License
 
