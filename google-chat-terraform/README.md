@@ -30,9 +30,9 @@ Google Chat API has a restriction: **only one Google Chat bot can be configured 
 │   - Google Chat API                 │
 │   - Secret Manager                  │
 │     └─ sommelier-credentials        │
-│   - Service Accounts:               │
-│     └─ sam-sommelier (Chat bot)     │
-│     └─ sam-sommelier-apis (Sheets)  │
+│   - Service Account:                │
+│     └─ sam-sommelier                │
+│        (Chat + Sheets/Docs)         │
 │                                     │
 └─────────────────────────────────────┘
 ```
@@ -46,7 +46,6 @@ This Terraform configuration creates:
 - Secret Manager API enabled
 - Google Drive API enabled
 - Google Sheets API enabled
-- Service account for Google APIs (Drive, Sheets) - **share your Sheets with this SA**
 - Organization policy override (allows SA key creation)
 
 ### Section 2: Slack Infrastructure (Active)
@@ -54,9 +53,9 @@ This Terraform configuration creates:
 
 ### Section 3: Google Chat Infrastructure (Active)
 - Google Chat API enabled
-- Service account for Google Chat bot operations
-- IAM role `roles/chat.owner` for the bot SA
-- Secret Manager secret for storing the bot's credentials
+- Service account for the agent (used for both Google APIs and Google Chat — see "Service Account" note below)
+- IAM role `roles/chat.owner` granted to that SA
+- Secret Manager secret for storing the SA's key (consumed by the middleware to sign Chat messages, and by the agent itself to call Sheets/Docs APIs)
 
 ## Prerequisites
 
@@ -191,20 +190,20 @@ python scripts/enable_google_chat_agent.py \
   --google-chat-project-id "sam-sommelier-chat-prod"
 ```
 
-### 4. Share Google Sheets
+### 4. Share Google Sheets and the Memory Doc
 
-Sam needs access to Google Sheets to analyze wine lists. Share your sheets with the **APIs service account** (NOT the Chat bot SA):
+Sam needs access to the cellar, consumed-wines, and tasting-notes spreadsheets, plus the memory Google Doc. Share each of them with Sam's service account — the same SA whose key is in Secret Manager:
 
 ```bash
-# Get the APIs service account email
-terraform output apis_service_account_email
-# Example output: sam-sommelier-apis@sam-sommelier-chat-prod.iam.gserviceaccount.com
+# Get the service account email
+terraform output service_account_email
+# Example output: sam-sommelier@sam-sommelier-chat-prod.iam.gserviceaccount.com
 ```
 
-Then:
-1. Open your Google Sheet
+Then for **each** of: cellar SSID, consumed-wines SSID, tasting-notes SSID, memory doc:
+1. Open the Sheet/Doc
 2. Click "Share"
-3. Add the APIs service account email
+3. Add the service account email
 4. Give it "Editor" permissions
 
 ### 5. Test
@@ -215,19 +214,16 @@ Then:
 
 ## Important Notes
 
-### Two Service Accounts
+### Service Account
 
-This setup creates **two separate service accounts**:
+A single service account does both jobs:
 
-1. **`sam-sommelier-apis@...`** (Google APIs SA)
-   - Used by Sam's Reasoning Engine to access Google Drive and Sheets
-   - **Share your Google Sheets with this SA**
-   - No key needed (Vertex AI uses Workload Identity)
+**`sam-sommelier@sam-sommelier-chat-prod.iam.gserviceaccount.com`**
+- Holds `roles/chat.owner` so it can send Google Chat messages
+- Its key lives in Secret Manager (`sommelier-credentials`) — read by the middleware at runtime to sign Chat messages, and by the agent itself to authenticate Sheets/Drive/Docs calls
+- Share your spreadsheets and the memory doc with this email
 
-2. **`sam-sommelier@...`** (Google Chat bot SA)
-   - Used by the middleware to send messages to Google Chat
-   - Key stored in Secret Manager for middleware to use
-   - **Do NOT share Sheets with this SA**
+This matches the upstream middleware template's pattern (one SA, one key, one email to share files with).
 
 ### Secret Location
 
@@ -300,9 +296,9 @@ This is the **most common error** when setting up a new bot. Check these items i
    gcloud secrets versions list sommelier-credentials --project=sam-sommelier-chat-prod
    ```
 
-### "Can't access Google Sheets" Error
-- Make sure you shared the Sheets with the **APIs service account** (`sam-sommelier-apis@...`)
-- NOT the Chat bot service account (`sam-sommelier@...`)
+### "Can't access Google Sheets" / 403 on Sheets API
+- Make sure you shared the sheet/doc with `sam-sommelier@sam-sommelier-chat-prod.iam.gserviceaccount.com` — that's the SA whose key is in Secret Manager
+- Verify with: `gcloud secrets versions access latest --secret=sommelier-credentials --project=sam-sommelier-chat-prod | python3 -c "import sys,json; print(json.load(sys.stdin)['client_email'])"` — the email it prints is the SA you need to share with
 - Check that Drive and Sheets APIs are enabled in Sam's project
 
 ## Maintenance

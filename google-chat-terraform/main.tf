@@ -69,20 +69,6 @@ resource "google_project_service" "docs" {
   disable_on_destroy = false
 }
 
-# Service Account for Google APIs (Drive, Sheets, Docs, etc.)
-# This SA will be used by Sam to access Google Drive and Sheets
-resource "google_service_account" "agent_apis" {
-  project      = data.google_project.agent_project.project_id
-  account_id   = "${var.bot_account_id}-apis"
-  display_name = "${var.bot_name} Google APIs"
-  description  = "Service account for ${var.bot_name} to access Google APIs (Drive, Sheets, etc.)"
-
-  depends_on = [
-    google_project_service.drive,
-    google_project_service.sheets
-  ]
-}
-
 # Allow service account key creation for this project
 # This overrides the organization policy that blocks key creation
 resource "google_project_organization_policy" "allow_sa_key_creation" {
@@ -240,13 +226,8 @@ output "project_id" {
   value       = var.project_id
 }
 
-output "apis_service_account_email" {
-  description = "Service account email for Google APIs (Drive, Sheets) - share your Google Docs with this"
-  value       = google_service_account.agent_apis.email
-}
-
-output "chat_service_account_email" {
-  description = "Service account email for Google Chat bot"
+output "service_account_email" {
+  description = "Service account email for Sam — share Google Sheets/Docs with this address; also used to send Google Chat messages"
   value       = google_service_account.chat_bot.email
 }
 
@@ -358,14 +339,18 @@ SECTION 4: TELEGRAM SETUP
 
 SECTION 5: GOOGLE APIS SETUP (Share Google Drive/Sheets)
 
-5a. Share Google Sheets/Drive files with the Google APIs service account:
-    Service Account Email: ${google_service_account.agent_apis.email}
+5a. Share each of the following with Sam's service account
+    (one SA does double duty — Sheets/Docs reads/writes AND Google Chat messages):
 
-    Instructions:
-    - Open your Google Sheet or Drive file
-    - Click "Share"
-    - Add the service account email above
-    - Give it "Editor" or "Viewer" access (depending on agent needs)
+    Service account: ${google_service_account.chat_bot.email}
+
+    Files to share (Editor):
+    - Cellar spreadsheet
+    - Consumed-wines spreadsheet
+    - Tasting-notes spreadsheet
+    - Memory Google Doc
+
+    For each one: open it → "Share" → add ${google_service_account.chat_bot.email} → Editor.
 
 ====================================================
 
