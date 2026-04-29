@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # deploy_and_update.sh — Deploy Sam the Som agent to Vertex AI,
-# test it, clean up the old version, and register with Slack middleware.
+# test it, clean up the old version, and update the Firestore pointer
+# the middleware reads.
 #
 # Usage:
 #   ./deploy_and_update.sh
@@ -10,7 +11,6 @@
 #   - gcloud CLI authenticated
 #   - ADK installed (in MY_VENV or PATH)
 #   - Slack bot token stored in Secret Manager
-#   - Middleware repo available for deploy_agent.py
 
 set -euo pipefail
 
@@ -38,7 +38,6 @@ PROJECT_ID="${PROJECT_ID:?PROJECT_ID must be set (via env var or GOOGLE_CLOUD_PR
 REGION="${REGION:-us-central1}"
 ADK_BIN="${ADK_BIN:-$(command -v adk 2>/dev/null || echo "adk")}"
 ADK_PYTHON="${ADK_PYTHON:-$(dirname "$ADK_BIN")/python3}"
-MIDDLEWARE_DIR="${MIDDLEWARE_DIR:?MIDDLEWARE_DIR must be set in .env or as an env var}"
 AGENT_DISPLAY_NAME="${AGENT_DISPLAY_NAME:-Sam the Som}"
 AGENT_FIRESTORE_ID="${AGENT_FIRESTORE_ID:?AGENT_FIRESTORE_ID must be set in .env - the Firestore document ID for this agent}"
 AGENT_DIR="${SCRIPT_DIR}"
@@ -83,8 +82,6 @@ if [[ ! -x "$ADK_BIN" ]] && [[ ! -f "$ADK_BIN" ]]; then
     exit 1
 fi
 ok "ADK binary found: $ADK_BIN"
-
-ok "Middleware repo available (not needed for deployment, but used for Firestore updates)"
 
 # Ensure the default compute SA can read the credentials secret
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null)

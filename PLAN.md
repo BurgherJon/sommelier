@@ -65,7 +65,6 @@ SOMMELIER_MEMORY_DOC_ID=your-memory-google-doc-id
 # Deployment
 ADK_BIN=/path/to/your/venv/bin/adk
 ADK_PYTHON=/path/to/your/venv/bin/python3
-MIDDLEWARE_DIR=/path/to/slack-vertex-ai-middleware
 AGENT_DISPLAY_NAME=Sam the Som
 SLACK_BOT_SECRET=slack-sommelier
 ```

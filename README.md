@@ -144,7 +144,6 @@ SOMMELIER_MEMORY_DOC_ID=your-memory-doc-id
 # Deployment paths (Windows)
 ADK_BIN=/c/Users/YourName/AppData/Roaming/Python/Python313/Scripts/adk
 ADK_PYTHON=/c/Python313/python
-MIDDLEWARE_DIR=/c/Users/YourName/projects/slack-vertex-ai-middleware
 AGENT_DISPLAY_NAME="Sam the Som"
 AGENT_FIRESTORE_ID=your-agent-firestore-document-id
 
@@ -181,7 +180,6 @@ SOMMELIER_MEMORY_DOC_ID=your-memory-doc-id
 # Deployment paths (Cloud Shell)
 ADK_BIN=/home/jonathan/.local/bin/adk
 ADK_PYTHON=/usr/bin/python3
-MIDDLEWARE_DIR=/home/jonathan/slack-vertex-ai-middleware
 AGENT_DISPLAY_NAME="Sam the Som"
 AGENT_FIRESTORE_ID=your-agent-firestore-document-id
 
