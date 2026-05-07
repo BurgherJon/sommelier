@@ -238,6 +238,11 @@ def search_cellar(query: str) -> Dict[str, Any]:
     Appellation, Country, and Vintage fields. Case-insensitive partial
     matching.
 
+    IMPORTANT: Limit yourself to no more than 15 search attempts per user
+    request. If you cannot find a wine after several varied queries, inform
+    the user that the wine does not appear to be in the cellar rather than
+    continuing to search with more variations.
+
     Args:
         query: Search term — e.g. "Barolo", "Cabernet", "2018", "Opus One".
 
